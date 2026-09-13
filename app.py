@@ -88,10 +88,13 @@ q_text = get_col_val(
 )
 st.write(f"**題目：** {q_text}")
 
-# 自動尋找所有可能的選項欄位
-options = []
-# 排除掉題目、答案、解析等欄位後，其他有內容的欄位都當作選項
-exclude_cols = [
+# 智慧尋找選項欄位：嚴格排除非選項的欄位名稱
+exclude_keywords = [
+  "序號",
+  "項次",
+  "編號",
+  "課程",
+  "單元",
   "題目",
   "問題",
   "Question",
@@ -102,11 +105,16 @@ exclude_cols = [
   "說明",
   "Explanation",
 ]
+
+options = []
 for col in df.columns:
-  if col not in exclude_cols:
+  col_str = str(col).strip()
+  # 檢查欄位名稱是否包含排除關鍵字
+  is_excluded = any(kw in col_str for kw in exclude_keywords)
+  if not is_excluded:
     val = row[col]
     if pd.notna(val) and str(val).strip() != "":
-      options.append(f"{col}: {val}" if not col.startswith("選項") else f"{val}")
+      options.append(f"{col_str}: {val}")
 
 user_choice = st.radio(
   "請選擇答案：", options, key=f"q_{selected_unit}_{idx}", index=None
