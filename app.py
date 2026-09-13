@@ -1,4 +1,5 @@
 import os
+import re
 import pandas as pd
 import streamlit as st
 
@@ -83,38 +84,40 @@ def get_col_val(row_data, possible_names, default=""):
   return default
 
 
-q_text = get_col_val(
-  row, ["題目", "問題", "Question", "題型"], "找不到題目欄位"
+full_text = str(
+  get_col_val(row, ["題目", "問題", "Question", "題型"], "找不到題目欄位")
 )
-st.write(f"**題目：** {q_text}")
 
-# 智慧尋找選項欄位：嚴格排除非選項的欄位名稱
-exclude_keywords = [
-  "序號",
-  "項次",
-  "編號",
-  "課程",
-  "單元",
-  "題目",
-  "問題",
-  "Question",
-  "答案",
-  "正確答案",
-  "Ans",
-  "解析",
-  "說明",
-  "Explanation",
-]
 
-options = []
-for col in df.columns:
-  col_str = str(col).strip()
-  # 檢查欄位名稱是否包含排除關鍵字
-  is_excluded = any(kw in col_str for kw in exclude_keywords)
-  if not is_excluded:
-    val = row[col]
-    if pd.notna(val) and str(val).strip() != "":
-      options.append(f"{col_str}: {val}")
+# 智慧解析：如果題目中包含 (A) (B) (C) (D)，自動將其拆解為獨立選項
+def parse_question_and_options(text):
+  # 尋找 (A) 或 A. 的位置
+  parts = re.split(r"(?=\(?[A-Da-d]\)[.、]?)", text)
+  if len(parts) > 1:
+    question_title = parts[0].strip()
+    extracted_options = [p.strip() for p in parts[1:] if p.strip()]
+    return question_title, extracted_options
+  else:
+    return text, []
+
+
+q_title, extracted_options = parse_question_and_options(full_text)
+
+st.write(f"**題目：** {q_title}")
+
+# 如果題目裡沒有切出選項，則嘗試從 Excel 其他欄位尋找
+if not extracted_options:
+  for col in df.columns:
+    col_str = str(col).strip()
+    if any(
+        kw in col_str
+        for kw in ["選項", "A", "B", "C", "D", "(A)", "(B)", "(C)", "(D)"]
+    ):
+      val = row[col]
+      if pd.notna(val) and str(val).strip() != "":
+        extracted_options.append(f"{col}: {val}")
+
+options = extracted_options if extracted_options else ["選項解析中或格式需確認"]
 
 user_choice = st.radio(
   "請選擇答案：", options, key=f"q_{selected_unit}_{idx}", index=None
