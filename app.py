@@ -76,23 +76,37 @@ st.subheader(f"📖 單元：{selected_unit.replace('.xlsx', '')}")
 st.markdown(f"### 第 {idx + 1} 題 / 共 {total_questions} 題")
 
 
-# 智慧尋找欄位名稱（支援各種常見的欄位命名）
 def get_col_val(row_data, possible_names, default=""):
   for name in possible_names:
-    if name in row_data:
+    if name in row_data and pd.notna(row_data[name]):
       return row_data[name]
   return default
 
 
-q_text = get_col_val(row, ["題目", "問題", "Question"], "找不到題目欄位")
+q_text = get_col_val(
+  row, ["題目", "問題", "Question", "題型"], "找不到題目欄位"
+)
 st.write(f"**題目：** {q_text}")
 
-opt_a = get_col_val(row, ["選項A", "A", "選項_A", "(A)", "選項1"], "")
-opt_b = get_col_val(row, ["選項B", "B", "選項_B", "(B)", "選項2"], "")
-opt_c = get_col_val(row, ["選項C", "C", "選項_C", "(C)", "選項3"], "")
-opt_d = get_col_val(row, ["選項D", "D", "選項_D", "(D)", "選項4"], "")
-
-options = [opt for opt in [opt_a, opt_b, opt_c, opt_d] if str(opt).strip() != ""]
+# 自動尋找所有可能的選項欄位
+options = []
+# 排除掉題目、答案、解析等欄位後，其他有內容的欄位都當作選項
+exclude_cols = [
+  "題目",
+  "問題",
+  "Question",
+  "答案",
+  "正確答案",
+  "Ans",
+  "解析",
+  "說明",
+  "Explanation",
+]
+for col in df.columns:
+  if col not in exclude_cols:
+    val = row[col]
+    if pd.notna(val) and str(val).strip() != "":
+      options.append(f"{col}: {val}" if not col.startswith("選項") else f"{val}")
 
 user_choice = st.radio(
   "請選擇答案：", options, key=f"q_{selected_unit}_{idx}", index=None
