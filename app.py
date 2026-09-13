@@ -1,11 +1,31 @@
 import os
 import re
+from google import genai
 import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="公共工程品管刷題教練", page_icon="📚", layout="centered")
 
-st.title("🏗️ 公共工程品管刷題教練")
+# 初始化 Gemini API 客戶端
+# 優先讀取 Streamlit Secrets，如果沒有則讀取環境變數
+api_key = None
+try:
+  if "GEMINI_API_KEY" in st.secrets:
+    api_key = st.secrets["GEMINI_API_KEY"]
+except Exception:
+  pass
+
+if not api_key:
+  api_key = os.environ.get("GEMINI_API_KEY")
+
+client = None
+if api_key:
+  try:
+    client = genai.Client(api_key=api_key)
+  except Exception as e:
+    st.sidebar.error(f"⚠️ Gemini 初始化失敗: {e}")
+
+st.title("🏗️ 公共工程品管刷題教練 (AI 家教版)")
 
 
 @st.cache_data
@@ -44,6 +64,7 @@ if "last_selected_unit" not in st.session_state:
 if st.session_state.last_selected_unit != selected_unit:
   st.session_state.current_index = 0
   st.session_state.show_answer = False
+  st.session_state.ai_explanation = ""
   st.session_state.starred_questions = []
   st.session_state.last_selected_unit = selected_unit
   st.rerun()
@@ -54,17 +75,20 @@ if "starred_questions" not in st.session_state:
   st.session_state.starred_questions = []
 if "show_answer" not in st.session_state:
   st.session_state.show_answer = False
+if "ai_explanation" not in st.session_state:
+  st.session_state.ai_explanation = ""
 
 total_questions = len(df)
 
 if st.sidebar.button("🔄 重置目前單元進度"):
   st.session_state.current_index = 0
   st.session_state.show_answer = False
+  st.session_state.ai_explanation = ""
   st.rerun()
 
 st.sidebar.markdown(f"**當前單元總題數：** {total_questions} 題")
 st.sidebar.markdown(
-  f"**★ 本單元星號題：** {len(st.session_state.starred_questions)} 題"
+    f"**★ 本單元星號題：** {len(st.session_state.starred_questions)} 題"
 )
 
 if st.session_state.current_index >= total_questions:
@@ -85,11 +109,10 @@ def get_col_val(row_data, possible_names, default=""):
 
 
 full_text = str(
-  get_col_val(row, ["題目", "問題", "Question", "題型"], "找不到題目欄位")
+    get_col_val(row, ["題目", "問題", "Question", "題型"], "找不到題目欄位")
 )
 
 
-# 完美解析：利用 findall 精準抓出 (A)... (B)... 完整選項區塊
 def parse_question_and_options(text):
   match = re.search(r"\(?[A-Da-d]\)", text)
   if not match:
@@ -99,7 +122,6 @@ def parse_question_and_options(text):
   question_title = text[:start_idx].strip()
   options_text = text[start_idx:]
 
-  # 抓出每一個完整的選項 (A)... (B)... 等
   raw_options = re.findall(
       r"(\(?[A-Da-d]\)[^()]+?(?=\(?[A-Da-d]\)|$))", options_text
   )
@@ -122,7 +144,7 @@ options = (
 )
 
 user_choice = st.radio(
-  "請選擇答案：", options, key=f"q_{selected_unit}_{idx}", index=None
+    "請選擇答案：", options, key=f"q_{selected_unit}_{idx}", index=None
 )
 
 col1, col2 = st.columns(2)
@@ -131,6 +153,7 @@ with col1:
   if st.button("📤 送出答案"):
     if user_choice is not None:
       st.session_state.show_answer = True
+      st.session_state.ai_explanation = ""
     else:
       st.warning("⚠️ 請先選擇一個選項！")
 
@@ -145,15 +168,88 @@ with col2:
     st.rerun()
 
 if st.session_state.show_answer:
-  ans = get_col_val(row, ["答案", "正確答案", "Ans"], "無")
-  exp = get_col_val(row, ["解析", "說明", "Explanation"], "無解析")
-  st.info(f"💡 **正確答案：** {ans}")
-  st.success(f"📖 **解析：** {exp}")
+  ans = str(
+      get_col_val(
+          row,
+          [
+              "答案",
+              "正確答案",
+              "解答",
+              "Ans",
+              "參考答案",
+              "正確解答",
+              "答案選項",
+          ],
+          "無",
+      )
+  )
+  exp = str(
+      get_col_val(
+          row,
+          [
+              "解析",
+              "詳解",
+              "說明",
+              "Explanation",
+              "解說",
+              "考點說明",
+              "備註",
+          ],
+          "",
+      )
+  )
+
+  st.info(f"💡 **參考答案：** {ans}")
+  if exp and exp != "nan":
+    st.success(f"📖 **原題庫解析：**\n\n{exp}")
+
+  st.markdown("---")
+  st.markdown("### 🤖 Gemini AI 智慧家教解析")
+
+  if not client:
+    st.error(
+        "⚠️ 尚未偵測到 Gemini API Key，請至 Streamlit Cloud Secrets"
+        " 進行設定。"
+    )
+  else:
+    if not st.session_state.ai_explanation:
+      if st.button("✨ 產生存疑解析 / 為什麼選這題？"):
+        with st.spinner(
+            "Gemini 正在為你調閱法規與工程實務進行深度剖析中..."
+        ):
+          try:
+            prompt = f"""
+                        你是一位專業的公共工程品管與法規專家家教。
+                        請針對以下公共工程品管題目進行詳細解說：
+                        
+                        題目：{q_title}
+                        選項：
+                        {chr(10).join(options)}
+                        
+                        原題庫參考答案：{ans}
+                        原題庫解析：{exp}
+                        
+                        請用繁體中文回答，包含以下結構：
+                        1. **正確選項與核心觀念**：明確指出正確答案為何。
+                        2. **選項剖析**：解釋為什麼正確答案是對的，以及其他選項為什麼是錯的。
+                        3. **法規或實務依據**：結合公共工程品質管理、採購法或工程實務說明背後原理。
+                        """
+            response = client.models.generate_content(
+                model="gemini-2.5-flash", contents=prompt
+            )
+            st.session_state.ai_explanation = response.text
+          except Exception as e:
+            st.session_state.ai_explanation = f"⚠️ AI 解析生成失敗：{e}"
+        st.rerun()
+
+    if st.session_state.ai_explanation:
+      st.markdown(st.session_state.ai_explanation)
 
   if st.button("下一題 ➡️"):
     if st.session_state.current_index < total_questions - 1:
       st.session_state.current_index += 1
       st.session_state.show_answer = False
+      st.session_state.ai_explanation = ""
       st.rerun()
     else:
       st.balloons()
