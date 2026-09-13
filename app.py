@@ -89,35 +89,37 @@ full_text = str(
 )
 
 
-# 智慧解析：如果題目中包含 (A) (B) (C) (D)，自動將其拆解為獨立選項
+# 完美解析：利用 findall 精準抓出 (A)... (B)... 完整選項區塊
 def parse_question_and_options(text):
-  # 尋找 (A) 或 A. 的位置
-  parts = re.split(r"(?=\(?[A-Da-d]\)[.、]?)", text)
-  if len(parts) > 1:
-    question_title = parts[0].strip()
-    extracted_options = [p.strip() for p in parts[1:] if p.strip()]
-    return question_title, extracted_options
-  else:
+  match = re.search(r"\(?[A-Da-d]\)", text)
+  if not match:
     return text, []
+
+  start_idx = match.start()
+  question_title = text[:start_idx].strip()
+  options_text = text[start_idx:]
+
+  # 抓出每一個完整的選項 (A)... (B)... 等
+  raw_options = re.findall(
+      r"(\(?[A-Da-d]\)[^()]+?(?=\(?[A-Da-d]\)|$))", options_text
+  )
+  if not raw_options:
+    raw_options = [
+        o.strip()
+        for o in re.split(r"\(?[A-Da-d]\)", options_text)
+        if o.strip()
+    ]
+
+  return question_title, [o.strip() for o in raw_options if o.strip()]
 
 
 q_title, extracted_options = parse_question_and_options(full_text)
 
 st.write(f"**題目：** {q_title}")
 
-# 如果題目裡沒有切出選項，則嘗試從 Excel 其他欄位尋找
-if not extracted_options:
-  for col in df.columns:
-    col_str = str(col).strip()
-    if any(
-        kw in col_str
-        for kw in ["選項", "A", "B", "C", "D", "(A)", "(B)", "(C)", "(D)"]
-    ):
-      val = row[col]
-      if pd.notna(val) and str(val).strip() != "":
-        extracted_options.append(f"{col}: {val}")
-
-options = extracted_options if extracted_options else ["選項解析中或格式需確認"]
+options = (
+    extracted_options if extracted_options else ["選項解析中或格式需確認"]
+)
 
 user_choice = st.radio(
   "請選擇答案：", options, key=f"q_{selected_unit}_{idx}", index=None
