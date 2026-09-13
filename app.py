@@ -7,11 +7,9 @@ st.set_page_config(page_title="公共工程品管刷題教練", page_icon="📚"
 st.title("🏗️ 公共工程品管刷題教練")
 
 
-# 自動掃描專案資料夾裡所有 .xlsx 檔案作為單元選項
 @st.cache_data
 def get_available_units():
   files = [f for f in os.listdir(".") if f.endswith(".xlsx")]
-  # 排序讓檔名整齊
   files.sort()
   return files
 
@@ -19,20 +17,13 @@ def get_available_units():
 unit_files = get_available_units()
 
 if not unit_files:
-  st.error(
-    "⚠️ 找不到任何 Excel 題庫檔案！請確認是否已將單元 Excel 檔案上傳至此 GitHub"
-    " 專案中。"
-  )
+  st.error("⚠️ 找不到任何 Excel 題庫檔案！")
   st.stop()
 
-# 側邊欄：單元下拉選單
 st.sidebar.header("📋 學習控制面板")
-
-# 讓使用者選擇單元
 selected_unit = st.sidebar.selectbox("選擇練習單元", unit_files)
 
 
-# 根據選取的單元動態載入對應的 Excel
 @st.cache_data
 def load_data(file_name):
   df = pd.read_excel(file_name)
@@ -42,10 +33,10 @@ def load_data(file_name):
 try:
   df = load_data(selected_unit)
 except Exception as e:
-  st.error(f"⚠️ 讀取檔案 {selected_unit} 失敗！錯誤訊息: {e}")
+  st.error(f"⚠️ 讀取檔案失敗：{e}")
   st.stop()
 
-# 當切換單元時，重置題目索引與狀態
+# 當切換單元時重置狀態
 if "last_selected_unit" not in st.session_state:
   st.session_state.last_selected_unit = selected_unit
 
@@ -56,7 +47,6 @@ if st.session_state.last_selected_unit != selected_unit:
   st.session_state.last_selected_unit = selected_unit
   st.rerun()
 
-# 初始化 Session State
 if "current_index" not in st.session_state:
   st.session_state.current_index = 0
 if "starred_questions" not in st.session_state:
@@ -76,20 +66,33 @@ st.sidebar.markdown(
   f"**★ 本單元星號題：** {len(st.session_state.starred_questions)} 題"
 )
 
-# 確保索引不會超出範圍
 if st.session_state.current_index >= total_questions:
   st.session_state.current_index = 0
 
-# 顯示當前題目
 idx = st.session_state.current_index
 row = df.iloc[idx]
 
 st.subheader(f"📖 單元：{selected_unit.replace('.xlsx', '')}")
 st.markdown(f"### 第 {idx + 1} 題 / 共 {total_questions} 題")
-st.write(f"**題目：** {row['題目']}")
 
-# 選項
-options = [row["選項A"], row["選項B"], row["選項C"], row["選項D"]]
+
+# 智慧尋找欄位名稱（支援各種常見的欄位命名）
+def get_col_val(row_data, possible_names, default=""):
+  for name in possible_names:
+    if name in row_data:
+      return row_data[name]
+  return default
+
+
+q_text = get_col_val(row, ["題目", "問題", "Question"], "找不到題目欄位")
+st.write(f"**題目：** {q_text}")
+
+opt_a = get_col_val(row, ["選項A", "A", "選項_A", "(A)", "選項1"], "")
+opt_b = get_col_val(row, ["選項B", "B", "選項_B", "(B)", "選項2"], "")
+opt_c = get_col_val(row, ["選項C", "C", "選項_C", "(C)", "選項3"], "")
+opt_d = get_col_val(row, ["選項D", "D", "選項_D", "(D)", "選項4"], "")
+
+options = [opt for opt in [opt_a, opt_b, opt_c, opt_d] if str(opt).strip() != ""]
 
 user_choice = st.radio(
   "請選擇答案：", options, key=f"q_{selected_unit}_{idx}", index=None
@@ -114,10 +117,11 @@ with col2:
       st.session_state.starred_questions.append(idx)
     st.rerun()
 
-# 顯示解析
 if st.session_state.show_answer:
-  st.info(f"💡 **正確答案：** {row['答案']}")
-  st.success(f"📖 **解析：** {row['解析']}")
+  ans = get_col_val(row, ["答案", "正確答案", "Ans"], "無")
+  exp = get_col_val(row, ["解析", "說明", "Explanation"], "無解析")
+  st.info(f"💡 **正確答案：** {ans}")
+  st.success(f"📖 **解析：** {exp}")
 
   if st.button("下一題 ➡️"):
     if st.session_state.current_index < total_questions - 1:
